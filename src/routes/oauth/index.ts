@@ -1,14 +1,6 @@
 import { ERRORS, sendError } from '@/errors';
 import { logger } from '@/logger';
-import {
-  ENV,
-  generateRedirectUrl,
-  getNewRefreshToken,
-  getUserByEmail,
-  gqlSdk,
-  insertUser,
-} from '@/utils';
-import { InsertUserMutation } from '@/utils/__generated__/graphql-request';
+import { ENV, generateRedirectUrl } from '@/utils';
 import {
   queryValidator,
   redirectTo as redirectToRule,
@@ -22,9 +14,9 @@ import { OAUTH_ROUTE } from './config';
 import { SessionStore } from './session-store';
 import {
   createGrantConfig,
+  createUser,
   normaliseProfile,
   preRequestProviderMiddleware,
-  transformOauthProfile,
 } from './utils';
 
 const SESSION_NAME = 'connect.sid';
@@ -217,81 +209,32 @@ export const oauthProviders = Router()
 
     const profile = await normaliseProfile(provider, response);
 
-    const providerUserId = profile?.id;
-    if (!providerUserId) {
-      logger.warn(`Missing id in profile for provider ${provider}`);
-      return sendErrorFromQuery(undefined, 'OAuth request cancelled');
-    }
-
     const { access_token: accessToken, refresh_token: refreshToken } = response;
 
-    let user: NonNullable<InsertUserMutation['insertUser']> | null = null;
-
-    // * Look for the user-provider
-    const {
-      authUserProviders: [authUserProvider],
-    } = await gqlSdk.authUserProviders({
-      provider,
-      providerUserId,
-    });
-
-    if (authUserProvider) {
-      // * The userProvider already exists. Update it with the new tokens
-      user = authUserProvider.user;
-      await gqlSdk.updateAuthUserprovider({
-        id: authUserProvider.id,
-        authUserProvider: {
-          accessToken,
-          refreshToken,
-        },
-      });
-    } else {
-      if (profile.email) {
-        user = await getUserByEmail(profile.email);
-      }
-      if (user) {
-        // * add this provider to existing user with the same email
-        const { insertAuthUserProvider } =
-          await gqlSdk.insertUserProviderToUser({
-            userProvider: {
-              userId: user.id,
-              providerId: provider,
-              providerUserId,
-              accessToken,
-              refreshToken,
-            },
-          });
-
-        if (!insertAuthUserProvider) {
-          logger.warn('Could not add a provider to user');
-          return sendError(res, 'internal-error', { redirectTo }, true);
-        }
-      } else {
-        // * No user found with this email. Create a new user
-        // TODO feature: check if registration is enabled
-        const userInput = await transformOauthProfile(profile, options);
-        user = await insertUser({
-          ...userInput,
-          userProviders: {
-            data: [
-              {
-                providerId: provider,
-                providerUserId,
-                accessToken,
-                refreshToken,
-              },
-            ],
-          },
-        });
-      }
+    if (!accessToken || !refreshToken) {
+      return sendErrorFromQuery(
+        undefined,
+        'Grant did not get a accessToken and refreshToken'
+      );
     }
 
-    if (user) {
-      const { refreshToken } = await getNewRefreshToken(user.id);
-      // * redirect back user to app url
-      return res.redirect(generateRedirectUrl(redirectTo, { refreshToken }));
-    }
+    try {
+      const newRefreshToken = await createUser(
+        provider,
+        { accessToken, refreshToken },
+        profile,
+        options
+      );
+      return res.redirect(
+        generateRedirectUrl(redirectTo, { refreshToken: newRefreshToken })
+      );
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        logger.error(error.message);
+        return sendErrorFromQuery(undefined, error.message);
+      }
 
-    logger.error('Could not retrieve user ID');
-    return sendErrorFromQuery(undefined, 'OAuth request cancelled');
+      logger.error('unexpected Error');
+      return sendErrorFromQuery(undefined, 'Unexpected Error: ' + error);
+    }
   });

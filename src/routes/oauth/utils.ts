@@ -7,7 +7,14 @@ import {
   email as emailValidator,
 } from '@/validation';
 import { InsertUserMutationVariables } from '@/utils/__generated__/graphql-request';
-import { ENV, getGravatarUrl } from '@/utils';
+import {
+  ENV,
+  getGravatarUrl,
+  getNewRefreshToken,
+  gqlSdk,
+  getUserByEmail,
+  insertUser,
+} from '@/utils';
 import { UserRegistrationOptions } from '@/types';
 
 import { OAUTH_ROUTE, PROVIDERS_CONFIG } from './config';
@@ -146,3 +153,92 @@ export const createGrantConfig = (): GrantConfig =>
       },
     }
   );
+
+async function findOrCreateUser(
+  provider: string,
+  profile: NormalisedProfile,
+  { refreshToken, accessToken }: { refreshToken: string; accessToken: string },
+  options?: Partial<UserRegistrationOptions>
+) {
+  const providerUserId = profile?.id;
+  if (!providerUserId) {
+    throw new Error(`Missing id in profile for provider ${provider}`);
+  }
+
+  // Check if a user-provider entry already exists
+  const {
+    authUserProviders: [authUserProvider],
+  } = await gqlSdk.authUserProviders({
+    provider,
+    providerUserId,
+  });
+
+  // If the userProvider exists just update the tokens and return the user.
+  if (authUserProvider) {
+    // Update the existing user-provider entry with new tokens
+    const user = authUserProvider.user;
+
+    await gqlSdk.updateAuthUserprovider({
+      id: authUserProvider.id,
+      authUserProvider: {
+        accessToken,
+        refreshToken,
+      },
+    });
+    return user;
+  }
+
+  // If the user already has already an account with this email. Just connect the provider
+  if (profile.email) {
+    const user = await getUserByEmail(profile.email);
+    if (user) {
+      const { insertAuthUserProvider } = await gqlSdk.insertUserProviderToUser({
+        userProvider: {
+          userId: user.id,
+          providerId: provider,
+          providerUserId,
+          accessToken,
+          refreshToken,
+        },
+      });
+      if (!insertAuthUserProvider) {
+        throw new Error('Could not add a provider to user');
+      }
+
+      return user;
+    }
+  }
+
+  // Otherwise create a new user
+  // TODO feature: check if registration is enabled
+  const userInput = await transformOauthProfile(profile, options);
+  const user = await insertUser({
+    ...userInput,
+    userProviders: {
+      data: [
+        {
+          providerId: provider,
+          providerUserId,
+          accessToken,
+          refreshToken,
+        },
+      ],
+    },
+  });
+  return user;
+}
+
+export async function createUser(
+  provider: string,
+  tokens: { refreshToken: string; accessToken: string },
+  profile: NormalisedProfile,
+  options?: Partial<UserRegistrationOptions>
+) {
+  const user = await findOrCreateUser(provider, profile, tokens, options);
+
+  if (!user) {
+    throw new Error('Could not retrieve user');
+  }
+  const { refreshToken } = await getNewRefreshToken(user.id);
+  return refreshToken;
+}
