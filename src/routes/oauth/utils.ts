@@ -1,21 +1,21 @@
 import { NextFunction, Request, Response } from 'express';
 import { GrantConfig, GrantResponse } from 'grant';
 
-import { castBooleanEnv, castStringArrayEnv } from '@config';
-import {
-  locale as localeValidator,
-  email as emailValidator,
-} from '@/validation';
-import { InsertUserMutationVariables } from '@/utils/__generated__/graphql-request';
+import { UserRegistrationOptions } from '@/types';
 import {
   ENV,
   getGravatarUrl,
   getNewRefreshToken,
-  gqlSdk,
   getUserByEmail,
+  gqlSdk,
   insertUser,
 } from '@/utils';
-import { UserRegistrationOptions } from '@/types';
+import { InsertUserMutationVariables } from '@/utils/__generated__/graphql-request';
+import {
+  email as emailValidator,
+  locale as localeValidator,
+} from '@/validation';
+import { castBooleanEnv, castStringArrayEnv } from '@config';
 
 import { OAUTH_ROUTE, PROVIDERS_CONFIG } from './config';
 
@@ -157,7 +157,10 @@ export const createGrantConfig = (): GrantConfig =>
 async function findOrCreateUser(
   provider: string,
   profile: NormalisedProfile,
-  { refreshToken, accessToken }: { refreshToken: string; accessToken: string },
+  {
+    refreshToken,
+    accessToken,
+  }: { refreshToken?: string; accessToken?: string },
   options?: Partial<UserRegistrationOptions>
 ) {
   const providerUserId = profile?.id;
@@ -175,7 +178,6 @@ async function findOrCreateUser(
 
   // If the userProvider exists just update the tokens and return the user.
   if (authUserProvider) {
-    // Update the existing user-provider entry with new tokens
     const user = authUserProvider.user;
 
     await gqlSdk.updateAuthUserprovider({
@@ -228,14 +230,23 @@ async function findOrCreateUser(
   return user;
 }
 
-export async function createUser(
-  provider: string,
-  tokens: { refreshToken: string; accessToken: string },
-  profile: NormalisedProfile,
-  options?: Partial<UserRegistrationOptions>
-) {
-  const user = await findOrCreateUser(provider, profile, tokens, options);
+type CreateUserOptions = {
+  provider: string;
+  tokens: {
+    refreshToken?: string;
+    accessToken?: string;
+  };
+  profile: NormalisedProfile;
+  options?: Partial<UserRegistrationOptions>;
+};
 
+export async function createUser({
+  provider,
+  tokens,
+  profile,
+  options = {},
+}: CreateUserOptions) {
+  const user = await findOrCreateUser(provider, profile, tokens, options);
   if (!user) {
     throw new Error('Could not retrieve user');
   }

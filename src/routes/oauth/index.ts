@@ -2,6 +2,7 @@ import { ERRORS, sendError } from '@/errors';
 import { logger } from '@/logger';
 import { ENV, generateRedirectUrl } from '@/utils';
 import {
+  bodyValidator,
   queryValidator,
   redirectTo as redirectToRule,
   registrationOptions,
@@ -11,6 +12,10 @@ import session from 'express-session';
 import grant from 'grant';
 import { v4 as uuidv4 } from 'uuid';
 import { OAUTH_ROUTE } from './config';
+import {
+  googleSignInAccessTokenSchema,
+  signInWithGoogleAccessToken,
+} from './native';
 import { SessionStore } from './session-store';
 import {
   createGrantConfig,
@@ -18,6 +23,8 @@ import {
   normaliseProfile,
   preRequestProviderMiddleware,
 } from './utils';
+
+import { asyncWrapper as aw } from '@/utils';
 
 const SESSION_NAME = 'connect.sid';
 
@@ -28,6 +35,14 @@ const SESSION_NAME = 'connect.sid';
  * but the end user will be redirected with an error to the client app.
  */
 const grantConfig = createGrantConfig();
+
+const router = Router();
+
+router.post(
+  '/native/google_token',
+  bodyValidator(googleSignInAccessTokenSchema),
+  aw(signInWithGoogleAccessToken)
+);
 
 /**
  * GET /signin/provider/{provider}
@@ -46,7 +61,8 @@ const grantConfig = createGrantConfig();
  * @return {string} 302 - Redirect to the initial url given as a query parameter in /signin/provider/{provider}
  * @tags Authentication
  */
-export const oauthProviders = Router()
+
+router
   /**
    * Use a middleware to keep the session between Oauth requests.
    * Once the authentication choregraphy is done (either success or failure), the session is destroyed.
@@ -214,17 +230,18 @@ export const oauthProviders = Router()
     if (!accessToken || !refreshToken) {
       return sendErrorFromQuery(
         undefined,
-        'Grant did not get a accessToken and refreshToken'
+        'Grant did not get an accessToken and refreshToken'
       );
     }
 
     try {
-      const newRefreshToken = await createUser(
+      const newRefreshToken = await createUser({
         provider,
-        { accessToken, refreshToken },
+        tokens: { accessToken, refreshToken },
         profile,
-        options
-      );
+        options,
+      });
+
       return res.redirect(
         generateRedirectUrl(redirectTo, { refreshToken: newRefreshToken })
       );
@@ -238,3 +255,6 @@ export const oauthProviders = Router()
       return sendErrorFromQuery(undefined, 'Unexpected Error: ' + error);
     }
   });
+
+const oauthProvidersRouter = router;
+export { oauthProvidersRouter };

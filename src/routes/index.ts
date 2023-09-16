@@ -4,7 +4,7 @@ import { ReasonPhrases } from 'http-status-codes';
 import nocache from 'nocache';
 import env from './env';
 import { mfaRouter } from './mfa';
-import { oauthProviders } from './oauth';
+import { oauthProvidersRouter } from './oauth';
 import { patRouter } from './pat';
 import { signInRouter } from './signin';
 import { signOutRouter } from './signout';
@@ -47,7 +47,7 @@ router.use(verifyRouter);
 // admin
 env(router);
 
-router.use(oauthProviders);
+router.use(oauthProvidersRouter);
 
 // all other routes should throw 404 not found
 router.use('*', (rwq, res) => {
