@@ -1,8 +1,8 @@
 export interface UserData {
   sub: string;
   name: string;
-  given_name: string;
-  family_name: string;
+  given_name?: string;
+  family_name?: string;
   picture: string;
   email: string;
   email_verified: boolean;
@@ -19,8 +19,6 @@ export function isUserData(data: unknown): data is UserData {
     data != null &&
     'sub' in data &&
     'name' in data &&
-    'given_name' in data &&
-    'family_name' in data &&
     'picture' in data &&
     'email' in data &&
     'email_verified' in data &&

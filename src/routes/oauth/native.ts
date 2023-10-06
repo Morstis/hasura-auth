@@ -46,16 +46,19 @@ export const signInWithGoogleAccessToken: RequestHandler<
 
   const googleResponse = await fetch(userInfoEndpoint(accessToken));
 
-  const userData: unknown = await googleResponse.json();
+  const userDataOrError: unknown = await googleResponse.json();
 
-  if (isErrorResponse(userData)) {
-    return res.send(userData);
+  if (isErrorResponse(userDataOrError)) {
+    return res.send(userDataOrError);
   }
-  if (!isUserData(userData)) {
-    return res.send('unknown format for google response: ' + userData);
+  if (!isUserData(userDataOrError)) {
+    return res.send({
+      error: 'unknown format for google response!',
+      data: userDataOrError,
+    });
   }
 
-  const profile = normaliseProfile(userData);
+  const profile = normaliseProfile(userDataOrError);
 
   try {
     const refreshToken = await createUser({
@@ -69,10 +72,10 @@ export const signInWithGoogleAccessToken: RequestHandler<
   } catch (error: unknown) {
     if (error instanceof Error) {
       logger.error(error.message);
-      return res.send(error.message);
+      return res.send({ error: error.message });
     }
 
     logger.error('unexpected Error');
-    return res.send('Unexpected Error: ' + error);
+    return res.send({ error: 'Unexpected Error: ' + error });
   }
 };
